@@ -1,4 +1,3 @@
-
 import streamlit as st
 import random
 import time
@@ -15,39 +14,129 @@ FIRST_NAMES = ["Alex","Sam","Jordan","Taylor","Riley","Morgan","Casey","Jamie","
 LAST_NAMES = ["Adams","Bell","Clark","Davis","Evans","Ford","Green","Hall","Irwin","James",
               "Khan","Lopez","Miller","Nguyen","Osei","Patel","Quinn","Reed","Smith","Young"]
 
-CRITICAL_SYMPTOMS = [
-    "None", "Severe chest pain", "Difficulty breathing", "Stroke symptoms", "Loss of consciousness",
-    "Uncontrolled bleeding", "Severe allergic reaction", "Severe burns", "Seizure",
-    "Severe pain crisis", "Poisoning/overdose", "Severe head injury"
-]
-OTHER_SYMPTOMS = [
-    "None", "Fever", "Headache", "Cough", "Sore throat", "Nausea", "Vomiting", "Diarrhea",
-    "Abdominal pain", "Back pain", "Dizziness", "Fatigue", "Joint pain",
-    "Mild breathing issues", "Minor cuts/bruises"
-]
-HIGH_RISK_CONDITIONS = [
-    "None", "Diabetes","Heart disease","Asthma","COPD","Cancer","Kidney disease","Liver disease",
-    "Pregnant","Immune compromised","Organ transplant","Blood disorders","Sickle cell disease","Hemophilia"
-]
-OTHER_CONDITIONS = [
-    "None", "High blood pressure","Arthritis","Depression","Anxiety","Migraine","Allergies",
-    "Thyroid disease","Osteoporosis"
-]
+# New data structures based on the provided triage logic
+CRITICAL_SYMPTOMS = {
+    "Severe chest pain": 1,
+    "Loss of consciousness": 1,
+    "Uncontrolled bleeding": 1,
+    "Severe allergic reaction (anaphylaxis)": 1,
+    "Poisoning/overdose": 1,
+    "Severe head injury": 1,
+    "Severe burns": 2,
+    "Seizure (active/recent)": 2,
+    "Severe pain crisis": 2
+}
+
+VULNERABLE_GROUPS_CONDITIONS = {
+    "Pregnant": True,
+    "Immune compromised": True,
+    "Organ transplant recipient": True,
+    "COPD": True,
+    "Cancer": True,
+    "Kidney disease": True,
+    "Liver disease": True,
+    "Blood disorders (Hemophilia, Sickle Cell, etc.)": True
+}
+
+OTHER_SYMPTOMS = {
+    "Abdominal pain": 3,
+    "Mild breathing issues": 3,
+    "Dizziness": 3,
+    "Vomiting": 4,
+    "Nausea": 5,
+    "Diarrhea": 5,
+    "Back pain": 6,
+    "Fatigue": 6,
+    "Joint pain": 6,
+    "Minor cuts/bruises": 7
+}
+
+OTHER_CONDITIONS = {
+    "Migraine": 6,
+    "High blood pressure (stable)": 7,
+    "Depression": 7,
+    "Anxiety": 7,
+    "Arthritis": 8,
+    "Allergies (non-severe)": 8,
+    "Thyroid disease": 8,
+    "Osteoporosis": 8,
+    "None (no medical issue, routine check)": 10
+}
+
+WAIT_TIME_TARGETS = {
+    1: "Immediate (0–2 minutes)",
+    2: "Very urgent (≤5 minutes)",
+    3: "Urgent (≤15 minutes)",
+    4: "Semi-urgent (≤30 minutes)",
+    5: "Moderate (≤1 hour)",
+    6: "Mild (≤2 hours)",
+    7: "Stable (≤3 hours)",
+    8: "Non-urgent (≤4 hours)",
+    9: "Very low priority (walk-in timeframe)",
+    10: "Lowest (same-day or next-day acceptable)"
+}
+
+def calculate_triage_rank(patient):
+    """Calculates the triage rank based on the new logic."""
+    ranks = []
+
+    # Check critical symptoms
+    for symptom in patient.get("critical", []):
+        if symptom in CRITICAL_SYMPTOMS:
+            ranks.append(CRITICAL_SYMPTOMS[symptom])
+
+    # Check other symptoms
+    for symptom in patient.get("other_symptoms", []):
+        if symptom in OTHER_SYMPTOMS:
+            ranks.append(OTHER_SYMPTOMS[symptom])
+
+    # Check other conditions
+    for condition in patient.get("other_conditions", []):
+        if condition in OTHER_CONDITIONS:
+            ranks.append(OTHER_CONDITIONS[condition])
+
+    # The 'high_risk' key from the form now maps to vulnerable conditions
+    is_vulnerable_by_condition = any(c in VULNERABLE_GROUPS_CONDITIONS for c in patient.get("high_risk", []))
+
+    if not ranks:
+        base_rank = 10  # Default for no selections
+    else:
+        base_rank = min(ranks)
+
+    # Determine if patient is in a vulnerable group
+    age = patient.get("age", 30)
+    is_vulnerable = (age <= 5) or (age >= 65) or is_vulnerable_by_condition
+
+    # Apply priority upgrade for vulnerable groups
+    if is_vulnerable:
+        # If it's a critical symptom (rank 1-2), it's flagged as highest emergency
+        if base_rank <= 2:
+            return 1
+        # For other symptoms, reduce rank by 1 (upgrade priority)
+        else:
+            return max(1, base_rank - 1)
+
+    return base_rank
 
 def random_name():
     return f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"
 
-def assign_priority_from_data(patient):
-    """Assigns priority level automatically"""
-    # Filter out "None" from selections
-    critical = [item for item in patient.get("critical", []) if item != "None"]
-    high_risk = [item for item in patient.get("high_risk", []) if item != "None"]
-    
-    if critical:
-        return "🚨 Life-threatening (Critical)", "red"
-    if high_risk or patient.get("age", 0) <= 5 or patient.get("age", 0) >= 65:
-        return "🟠 Vulnerable (High Priority)", "orange"
-    return "🟢 Standard Care", "green"
+def assign_priority_from_rank(patient):
+    """Assigns priority level and color based on the calculated triage rank."""
+    rank = calculate_triage_rank(patient)
+    patient['rank'] = rank  # Store the rank in the patient dict
+
+    if rank <= 2:
+        priority_label = "🚨 Life-threatening (Critical)"
+        color = "red"
+    elif rank <= 5:
+        priority_label = "🟠 Vulnerable (High Priority)"
+        color = "orange"
+    else:
+        priority_label = "🟢 Standard Care"
+        color = "green"
+
+    return priority_label, color
 
 def make_mock_patient(idx=None, force_priority=None):
     """Create one mock patient dict"""
@@ -58,10 +147,10 @@ def make_mock_patient(idx=None, force_priority=None):
     other_symptoms = []
 
     if force_priority == "critical" or random.random() < 0.12:
-        critical = random.sample(CRITICAL_SYMPTOMS, k=1)
+        critical = random.sample(list(CRITICAL_SYMPTOMS.keys()), k=1)
     if force_priority == "vulnerable" or random.random() < 0.2:
-        high_risk = random.sample(HIGH_RISK_CONDITIONS, k=1)
-    other_symptoms = random.sample(OTHER_SYMPTOMS, k=random.randint(0,2))
+        high_risk = random.sample(list(VULNERABLE_GROUPS_CONDITIONS.keys()), k=1)
+    other_symptoms = random.sample(list(OTHER_SYMPTOMS.keys()), k=random.randint(0,2))
 
     patient = {
         "id": idx if idx is not None else random.randint(1000,9999),
@@ -70,44 +159,33 @@ def make_mock_patient(idx=None, force_priority=None):
         "critical": critical,
         "other_symptoms": other_symptoms,
         "high_risk": high_risk,
-        "other_conditions": random.sample(OTHER_CONDITIONS, k=random.randint(0,1)),
+        "other_conditions": random.sample(list(OTHER_CONDITIONS.keys()), k=random.randint(0,1)),
         "check_in": (datetime.now() - timedelta(minutes=random.randint(0,120))).isoformat(),
         "status": random.choices(["waiting","in_treatment"], weights=[0.6,0.4])[0]
     }
-    patient["priority"], patient["color"] = assign_priority_from_data(patient)
+    patient["priority"], patient["color"] = assign_priority_from_rank(patient)
     return patient
 
-def get_treatment_duration(priority):
-    """Get expected treatment duration based on priority"""
-    if "Life-threatening" in priority:
-        return 15
-    elif "Vulnerable" in priority:
-        return 25
+def get_treatment_duration(patient):
+    """Get expected treatment duration based on patient's rank"""
+    rank = patient.get("rank", 10)  # Default to lowest priority
+    if rank <= 2:
+        return 15  # Critical
+    elif rank <= 5:
+        return 25  # High Priority
     else:
-        return 10
+        return 10  # Standard
 
 def calculate_wait_time(patient, queue_position):
-    """Calculate estimated wait time for a patient"""
-    priority_value = 1 if "Life-threatening" in patient["priority"] else (2 if "Vulnerable" in patient["priority"] else 3)
-    
-    # Count patients ahead with same or higher priority
-    patients_ahead = 0
-    for i, p in enumerate(st.session_state.queue_patients):
-        if i >= queue_position:
-            break
-        p_priority = 1 if "Life-threatening" in p["priority"] else (2 if "Vulnerable" in p["priority"] else 3)
-        if p_priority <= priority_value:
-            patients_ahead += 1
-    
-    # Calculate wait time based on treatment durations
+    """Calculate estimated wait time for a patient based on rank."""
+    # The queue is sorted by rank, so all patients ahead have higher or equal priority.
+    # We just need to sum their estimated treatment times.
     wait_time = 0
-    for i, p in enumerate(st.session_state.queue_patients):
+    for i, p_ahead in enumerate(st.session_state.queue_patients):
         if i >= queue_position:
             break
-        p_priority = 1 if "Life-threatening" in p["priority"] else (2 if "Vulnerable" in p["priority"] else 3)
-        if p_priority <= priority_value:
-            wait_time += get_treatment_duration(p["priority"])
-    
+        wait_time += get_treatment_duration(p_ahead)
+
     return wait_time
 
 def get_waiting_minutes(check_in_time):
@@ -122,63 +200,42 @@ def initialize_sample_queue_data():
         # Sample waiting patients
         sample_waiting = [
             {
-                "id": 1001,
-                "name": "John Doe",
-                "priority": "🚨 Life-threatening (Critical)",
-                "check_in": (datetime.now() - timedelta(minutes=5)).isoformat(),
-                "age": 45
+                "id": 1001, "name": "John Doe", "priority": "🚨 Life-threatening (Critical)",
+                "check_in": (datetime.now() - timedelta(minutes=5)).isoformat(), "age": 45, "rank": 1
             },
             {
-                "id": 1002,
-                "name": "Mary Smith", 
-                "priority": "🟠 Vulnerable (High Priority)",
-                "check_in": (datetime.now() - timedelta(minutes=10)).isoformat(),
-                "age": 67
+                "id": 1002, "name": "Mary Smith", "priority": "🟠 Vulnerable (High Priority)",
+                "check_in": (datetime.now() - timedelta(minutes=10)).isoformat(), "age": 67, "rank": 3
             },
             {
-                "id": 1003,
-                "name": "Alex Johnson",
-                "priority": "🟢 Standard Care",
-                "check_in": (datetime.now() - timedelta(minutes=3)).isoformat(),
-                "age": 28
+                "id": 1003, "name": "Alex Johnson", "priority": "🟢 Standard Care",
+                "check_in": (datetime.now() - timedelta(minutes=3)).isoformat(), "age": 28, "rank": 7
             },
             {
-                "id": 1004,
-                "name": "Fatima Ali",
-                "priority": "🟠 Vulnerable (High Priority)", 
-                "check_in": (datetime.now() - timedelta(minutes=7)).isoformat(),
-                "age": 34
+                "id": 1004, "name": "Fatima Ali", "priority": "🟠 Vulnerable (High Priority)",
+                "check_in": (datetime.now() - timedelta(minutes=7)).isoformat(), "age": 34, "rank": 4
             }
         ]
-        
+
         # Sample patients in treatment
         sample_treatment = [
             {
-                "id": 2001,
-                "name": "Peter Brown",
-                "priority": "🚨 Life-threatening (Critical)",
+                "id": 2001, "name": "Peter Brown", "priority": "🚨 Life-threatening (Critical)",
                 "treatment_start": (datetime.now() - timedelta(minutes=12)).isoformat(),
-                "expected_duration": 15,
-                "age": 52
+                "expected_duration": 15, "age": 52, "rank": 2
             },
             {
-                "id": 2002,
-                "name": "Grace Kim",
-                "priority": "🟢 Standard Care",
+                "id": 2002, "name": "Grace Kim", "priority": "🟢 Standard Care",
                 "treatment_start": (datetime.now() - timedelta(minutes=5)).isoformat(),
-                "expected_duration": 10,
-                "age": 31
+                "expected_duration": 10, "age": 31, "rank": 8
             },
             {
-                "id": 2003,
-                "name": "Ahmed Musa",
-                "priority": "🟠 Vulnerable (High Priority)",
+                "id": 2003, "name": "Ahmed Musa", "priority": "🟠 Vulnerable (High Priority)",
                 "treatment_start": (datetime.now() - timedelta(minutes=18)).isoformat(),
-                "expected_duration": 25,
-                "age": 58
+                "expected_duration": 25, "age": 58, "rank": 5
             }
         ]
-        
+
         st.session_state.queue_patients = sample_waiting
         st.session_state.treatment_patients = sample_treatment
 
@@ -238,13 +295,13 @@ with st.form("checkin_form", clear_on_submit=False):
         age = st.number_input("Age", min_value=0, max_value=120, value=30, step=1)
 
     with st.expander("🔴 Critical Emergency Symptoms"):
-        selected_critical = st.multiselect("", CRITICAL_SYMPTOMS, default=st.session_state.form_selections["critical"], key="critical_symptoms")
+        selected_critical = st.multiselect("", list(CRITICAL_SYMPTOMS.keys()), default=st.session_state.form_selections["critical"], key="critical_symptoms")
     with st.expander("🟡 Other Current Symptoms"):
-        selected_other = st.multiselect("", OTHER_SYMPTOMS, default=st.session_state.form_selections["other"], key="other_symptoms")
+        selected_other = st.multiselect("", list(OTHER_SYMPTOMS.keys()), default=st.session_state.form_selections["other"], key="other_symptoms")
     with st.expander("🟠 High-Risk Medical Conditions"):
-        selected_high_risk = st.multiselect("", HIGH_RISK_CONDITIONS, default=st.session_state.form_selections["high_risk"], key="high_risk_conditions")
+        selected_high_risk = st.multiselect("", list(VULNERABLE_GROUPS_CONDITIONS.keys()), default=st.session_state.form_selections["high_risk"], key="high_risk_conditions")
     with st.expander("⚪ Other Medical Conditions"):
-        selected_other_conditions = st.multiselect("", OTHER_CONDITIONS, default=st.session_state.form_selections["other_conditions"], key="other_conditions")
+        selected_other_conditions = st.multiselect("", list(OTHER_CONDITIONS.keys()), default=st.session_state.form_selections["other_conditions"], key="other_conditions")
 
     submitted = st.form_submit_button("✅ Complete Medical Check-in")
 
@@ -274,13 +331,13 @@ st.session_state.form_selections = {
 if submitted:
     # Validate all required fields
     errors = []
-    
+
     if not full_name.strip():
         errors.append("Please enter a name.")
-    
+
     if age <= 0:
         errors.append("Please enter a valid age.")
-    
+
     # Check if all categories are set to "None" or empty
     all_none_or_empty = (
         (not selected_critical or selected_critical == ["None"]) and
@@ -288,10 +345,10 @@ if submitted:
         (not selected_high_risk or selected_high_risk == ["None"]) and
         (not selected_other_conditions or selected_other_conditions == ["None"])
     )
-    
+
     if all_none_or_empty:
         errors.append("Please select at least one medical symptom or condition from any category to proceed.")
-    
+
     if errors:
         for error in errors:
             st.error(error)
@@ -307,7 +364,7 @@ if submitted:
             "check_in": datetime.now().isoformat(),
             "status": "waiting"
         }
-        new_patient["priority"], new_patient["color"] = assign_priority_from_data(new_patient)
+        new_patient["priority"], new_patient["color"] = assign_priority_from_rank(new_patient)
         st.session_state.patients.append(new_patient)
         st.session_state.current_patient_id = new_patient["id"]
         st.session_state.checkin_completed = True
@@ -321,12 +378,12 @@ if st.session_state.checkin_completed:
     # Create smooth transition effect using Streamlit
     if "dashboard_loaded" not in st.session_state:
         st.session_state.dashboard_loaded = True
-        
+
         # Create loading animation
         loading_placeholder = st.empty()
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
+
         # Simulate loading with progress
         for i in range(101):
             progress_bar.progress(i)
@@ -339,12 +396,12 @@ if st.session_state.checkin_completed:
             else:
                 status_text.text("✅ Dashboard ready!")
             time.sleep(0.02)  # Small delay for smooth effect
-        
+
         # Clear loading elements
         loading_placeholder.empty()
         progress_bar.empty()
         status_text.empty()
-    
+
     st.markdown("---")
     st.header("🩺 Triage Dashboard")
     st.write("Welcome to the emergency care dashboard. Your information has been added to the queue.")
@@ -373,13 +430,11 @@ if st.session_state.checkin_completed:
 
     # Ordered waiting queue
     def priority_value(p):
-        if "Life-threatening" in p["priority"]: return 1
-        if "Vulnerable" in p["priority"]: return 2
-        return 3
+        return (p.get('rank', 10), p["check_in"])
 
     waiting_patients = sorted(
         [p for p in patients if p["status"] == "waiting"],
-        key=lambda x: (priority_value(x), x["check_in"])
+        key=priority_value
     )
 
     st.subheader("⏭️ Next Up (Top 3)")
@@ -403,12 +458,12 @@ if st.session_state.checkin_completed:
     # Action buttons
     st.markdown("---")
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if st.button("🚨 View Emergency Queue Management", type="primary"):
             st.session_state.show_queue_management = True
             st.rerun()
-    
+
     with col2:
         if st.button("🔄 Start New Check-in"):
             st.session_state.checkin_completed = False
@@ -434,7 +489,7 @@ else:
 if st.session_state.show_queue_management:
     st.markdown("---")
     st.header("🚨 Emergency Queue Management")
-    
+
     # Back to dashboard button
     if st.button("← Back to Dashboard"):
         st.session_state.show_queue_management = False
@@ -461,18 +516,14 @@ if st.session_state.show_queue_management:
                     "name": current_patient["name"],
                     "priority": current_patient["priority"],
                     "check_in": current_patient["check_in"],
-                    "age": current_patient["age"]
+                    "age": current_patient["age"],
+                    "rank": current_patient.get("rank")
                 }
                 st.session_state.queue_patients.append(queue_patient)
 
-    # Sort queue by priority
+    # Sort queue by priority rank and then check-in time
     def priority_sort_key(patient):
-        if "Life-threatening" in patient["priority"]:
-            return (1, patient["check_in"])  # Critical first, then by check-in time
-        elif "Vulnerable" in patient["priority"]:
-            return (2, patient["check_in"])  # Vulnerable second, then by check-in time
-        else:
-            return (3, patient["check_in"])  # General last, then by check-in time
+        return (patient.get('rank', 10), patient["check_in"])
 
     st.session_state.queue_patients.sort(key=priority_sort_key)
 
@@ -482,37 +533,37 @@ if st.session_state.show_queue_management:
         for i, patient in enumerate(st.session_state.queue_patients):
             waited_mins = get_waiting_minutes(patient["check_in"])
             est_remaining = calculate_wait_time(patient, i)
-            expected_wait = get_treatment_duration(patient["priority"])
-            
+            expected_wait = get_treatment_duration(patient)
+
             # Check if patient is overdue
             is_overdue = waited_mins > expected_wait
-            
+
             col1, col2, col3, col4, col5, col6 = st.columns([2, 1.5, 1, 1.5, 1, 1])
-            
+
             with col1:
                 if is_overdue:
                     st.markdown(f"**🔴 {patient['name']}** (ID: {patient['id']})")
                 else:
                     st.markdown(f"**{patient['name']}** (ID: {patient['id']})")
-            
+
             with col2:
                 st.write(patient["priority"])
-            
+
             with col3:
                 if is_overdue:
                     st.markdown(f"<span style='color: red; font-weight: bold;'>{waited_mins} mins</span>", unsafe_allow_html=True)
                 else:
                     st.write(f"{waited_mins} mins")
-            
+
             with col4:
                 st.write(f"{est_remaining} mins")
-            
+
             with col5:
                 if is_overdue:
                     st.markdown("<span style='color: red; font-weight: bold;'>OVERDUE</span>", unsafe_allow_html=True)
                 else:
                     st.write("Waiting")
-            
+
             with col6:
                 col6a, col6b = st.columns(2)
                 with col6a:
@@ -534,33 +585,33 @@ if st.session_state.show_queue_management:
             treatment_mins = get_waiting_minutes(patient["treatment_start"])
             expected_duration = patient["expected_duration"]
             is_overdue = treatment_mins > expected_duration
-            
+
             col1, col2, col3, col4, col5, col6 = st.columns([2, 1.5, 1, 1, 1, 1])
-            
+
             with col1:
                 if is_overdue:
                     st.markdown(f"**🔴 {patient['name']}** (ID: {patient['id']})")
                 else:
                     st.markdown(f"**{patient['name']}** (ID: {patient['id']})")
-            
+
             with col2:
                 st.write(patient["priority"])
-            
+
             with col3:
                 st.write(f"{expected_duration} mins")
-            
+
             with col4:
                 if is_overdue:
                     st.markdown(f"<span style='color: red; font-weight: bold;'>{treatment_mins} mins</span>", unsafe_allow_html=True)
                 else:
                     st.write(f"{treatment_mins} mins")
-            
+
             with col5:
                 if is_overdue:
                     st.markdown("<span style='color: red; font-weight: bold;'>OVERDUE</span>", unsafe_allow_html=True)
                 else:
                     st.write("In Treatment")
-            
+
             with col6:
                 if st.button("✅", key=f"complete_treatment_{patient['id']}", help="Mark as Complete"):
                     # Move to completed
@@ -573,8 +624,8 @@ if st.session_state.show_queue_management:
     # Section 3: Move next patient from queue to treatment
     if st.session_state.queue_patients:
         st.subheader("🔄 Queue Management")
-        next_patient = st.session_state.queue_patients[0]
-        
+        next__patient = st.session_state.queue_patients[0]
+
         col1, col2 = st.columns([3, 1])
         with col1:
             st.write(f"**Next patient:** {next_patient['name']} ({next_patient['priority']})")
@@ -585,8 +636,9 @@ if st.session_state.show_queue_management:
                     "id": next_patient["id"],
                     "name": next_patient["name"],
                     "priority": next_patient["priority"],
+                    "rank": next_patient.get("rank"),
                     "treatment_start": datetime.now().isoformat(),
-                    "expected_duration": get_treatment_duration(next_patient["priority"]),
+                    "expected_duration": get_treatment_duration(next_patient),
                     "age": next_patient["age"]
                 }
                 st.session_state.treatment_patients.append(treatment_patient)
@@ -606,14 +658,14 @@ if st.session_state.show_queue_management:
         st.markdown("""
         **Default Estimated Treatment Durations:**
         - 🔴 **Critical (Life-threatening)**: ~15 minutes
-        - 🟠 **Vulnerable (High Priority)**: ~25 minutes  
+        - 🟠 **Vulnerable (High Priority)**: ~25 minutes
         - 🟢 **General (Standard Care)**: ~10 minutes
-        
+
         **Queue Priority Order:**
         1. Critical patients first
         2. Vulnerable patients second
         3. General patients last
-        
+
         **Overdue Indicators:**
         - Waiting time exceeds expected treatment duration
         - Treatment time exceeds expected duration
